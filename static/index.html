@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>态势感知 ↔ 深澜 用户定位中间件</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>态势感知 ↔ 深澜 用户定位中间件</h1>
+      <p class="sub">按 IP 发现时间匹配深澜认证会话，消除 DHCP 漂移，定位真实终端与联系人</p>
+    </div>
+    <div class="status" id="status">
+      <span class="pill">在线记录：<b id="sl-count">0</b></span>
+      <span class="pill">上网明细：<b id="of-count">0</b></span>
+      <span class="pill">最近同步：<b id="sl-sync">—</b></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- ① 在线数据源（实时） -->
+    <section class="card">
+      <div class="card-head" onclick="toggle('settings')">
+        <h2>① 在线数据源（深澜实时 · 直连 MySQL）</h2><span class="chev">▾</span>
+      </div>
+      <div class="card-body" id="settings">
+        <div class="grid">
+          <label>主机 <input id="sl-host" placeholder="10.248.15.50"></label>
+          <label>端口 <input id="sl-port" placeholder="3306"></label>
+          <label>数据库 <input id="sl-db" placeholder="srun4k"></label>
+          <label>用户名 <input id="sl-user" placeholder="root"></label>
+          <label>密码 <input id="sl-pass" type="password" placeholder="密码"></label>
+          <label>同步间隔(分钟,0=手动) <input id="sl-interval" placeholder="0"></label>
+        </div>
+        <div class="sql-box">
+          <label class="sql-label">自定义SQL（可选 · 填写后覆盖"选择表 + 列映射"，用于 JOIN 等复杂查询）</label>
+          <small class="sql-hint">必须 SELECT 出以下别名：account, name, ip, mac, online_time, offline_time（在线表无下线时间可写 NULL AS offline_time）；可选 contact。深澜在线表真实字段：MAC=user_mac，上线=add_time(Unix时间戳)，下线=drop_time(在线时为0)，联系人=users.phone</small>
+          <textarea id="sl-sql" rows="4" placeholder="SELECT o.user_name AS account, u.user_real_name AS name, o.ip AS ip, o.user_mac AS mac, o.add_time AS online_time, o.drop_time AS offline_time, u.phone AS contact FROM srun4k.online_radius o LEFT JOIN srun4k.users u ON o.user_name=u.user_name"></textarea>
+        </div>
+        <div class="row">
+          <button id="btn-discover">连接并发现表</button>
+          <select id="sl-table" onchange="onTableChange()"><option value="">— 选择表 —</option></select>
+          <button id="btn-sync">立即同步</button>
+          <button id="btn-save" class="primary">保存设置</button>
+        </div>
+        <div id="sl-cols" class="cols"></div>
+        <div id="sl-msg" class="msg"></div>
+        <div class="import-box">
+          <strong>或：在线数据导入（CSV/XLSX）</strong>
+          <span class="sql-hint">当数据库无法直连时，可把深澜在线表/认证日志的导出文件直接导入（列头含 用户名/真实姓名/IP地址/MAC/上线时间 等即可）</span>
+          <div class="row" style="margin-top:6px">
+            <input type="file" id="sl-file" accept=".csv,.xlsx,.xls,.tsv">
+            <button id="btn-sl-import">导入在线文件</button>
+          </div>
+        </div>
+        <div id="sl-imp-msg" class="msg"></div>
+      </div>
+    </section>
+
+    <!-- ② 离线 / 上网明细 数据源 -->
+    <section class="card">
+      <div class="card-head" onclick="toggle('offline')">
+        <h2>② 离线 / 上网明细数据源（含离线历史 · 可回溯时间段）</h2><span class="chev">▾</span>
+      </div>
+      <div class="card-body" id="offline">
+        <p class="sql-hint">用于匹配<strong>过去的</strong>态势感知事件：把深澜后台"日志管理 → 上网明细"页面按时间段<strong>导出</strong>的 Excel/CSV 直接上传即可（该表含上下线时间，可精确回溯 IP 当时归属）。也可配置直连历史表（若你们有记账/会话历史库）。</p>
+        <div class="import-box" style="margin-top:8px">
+          <strong>上传上网明细导出文件（推荐）</strong>
+          <div class="row" style="margin-top:6px">
+            <input type="file" id="of-file" accept=".csv,.xlsx,.xls,.tsv">
+            <button id="btn-of-import" class="primary">导入上网明细</button>
+            <span class="pill" style="margin-left:6px">已录入：<b id="of-count2">0</b> 条</span>
+            <span class="pill">最近同步：<b id="of-sync">—</b></span>
+          </div>
+          <div id="of-imp-msg" class="msg"></div>
+        </div>
+        <details class="db-detail">
+          <summary>或：直连离线/历史数据库（可选）</summary>
+          <div class="grid" style="margin-top:8px">
+            <label>主机 <input id="of-host" placeholder="10.248.15.50"></label>
+            <label>端口 <input id="of-port" placeholder="3306"></label>
+            <label>数据库 <input id="of-db" placeholder="srun4k"></label>
+            <label>用户名 <input id="of-user" placeholder="root"></label>
+            <label>密码 <input id="of-pass" type="password" placeholder="密码"></label>
+          </div>
+          <div class="sql-box">
+            <label class="sql-label">自定义SQL（可选 · 历史会话表）</label>
+            <small class="sql-hint">SELECT 出别名 account, name, ip, mac, online_time, offline_time（可选 contact）。例如某历史记账表。</small>
+            <textarea id="of-sql" rows="3" placeholder="SELECT user_name AS account, user_real_name AS name, ip AS ip, user_mac AS mac, acctstarttime AS online_time, acctstoptime AS offline_time, phone AS contact FROM srun4k.radacct"></textarea>
+          </div>
+          <div class="row" style="margin-top:6px">
+            <button id="btn-of-dbsave">保存离线库设置</button>
+            <button id="btn-of-sync">从数据库同步(离线表)</button>
+          </div>
+          <div id="of-db-msg" class="msg"></div>
+        </details>
+      </div>
+    </section>
+
+    <!-- ③ 态势感知上传 -->
+    <section class="card">
+      <div class="card-head" onclick="toggle('upload')">
+        <h2>③ 上传态势感知导出表</h2><span class="chev">▾</span>
+      </div>
+      <div class="card-body" id="upload">
+        <div class="row">
+          <input type="file" id="file" accept=".csv,.xlsx,.xls,.tsv">
+          <button id="btn-upload" class="primary">上传并解析</button>
+        </div>
+        <div id="up-msg" class="msg"></div>
+      </div>
+    </section>
+
+    <!-- ④ 匹配 -->
+    <section class="card">
+      <div class="card-head" onclick="toggle('match')">
+        <h2>④ 运行匹配并导出</h2><span class="chev">▾</span>
+      </div>
+      <div class="card-body" id="match">
+        <div class="row">
+          <button id="btn-match" class="primary">运行匹配</button>
+          <label>筛选置信度
+            <select id="f-confidence">
+              <option value="">全部</option>
+              <option value="高">高</option>
+              <option value="中">中</option>
+              <option value="低">低</option>
+              <option value="未匹配">未匹配</option>
+            </select>
+          </label>
+          <a class="btn" id="btn-export-csv" href="/api/match/export?fmt=csv">导出CSV</a>
+          <a class="btn" id="btn-export-xlsx" href="/api/match/export?fmt=xlsx">导出XLSX</a>
+        </div>
+        <div id="match-msg" class="msg"></div>
+        <div class="table-wrap">
+          <table id="result-table">
+            <thead>
+              <tr>
+                <th>发现时间</th><th>终端IP</th><th>匹配账号</th><th>用户姓名</th>
+                <th>终端MAC</th><th>联系人</th><th>数据来源</th><th>上线时间</th><th>置信度</th><th>候选数</th><th>说明</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

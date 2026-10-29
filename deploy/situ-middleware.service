@@ -1,0 +1,15 @@
+[Unit]
+Description=态势感知 <-> 深澜 用户定位中间件 (Situational Awareness <-> Srun locator)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__ROOT__
+Environment=PORT=__PORT__
+ExecStart=__PYTHON__ __ROOT__/app.py
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
